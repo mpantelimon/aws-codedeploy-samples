@@ -14,7 +14,7 @@
 # permissions and limitations under the License.
 
 # ELB_LIST defines which Elastic Load Balancers this instance should be part of.
-# The elements in ELB_LIST should be seperated by space.
+# The elements in ELB_LIST should be separated by space.
 ELB_LIST=""
 
 # Under normal circumstances, you shouldn't need to change anything below this line.
@@ -25,7 +25,7 @@ export PATH="$PATH:/usr/bin:/usr/local/bin"
 # If true, all messages will be printed. If false, only fatal errors are printed.
 DEBUG=true
 
-# Number of times to check for a resouce to be in the desired state.
+# Number of times to check for a resource to be in the desired state.
 WAITER_ATTEMPTS=60
 
 # Number of seconds to wait between attempts for resource to be in a state.
@@ -68,7 +68,7 @@ autoscaling_group_name() {
     elif [ "$autoscaling_name" == "None" ]; then
         echo ""
     else
-        echo "${autoscaling_name}"
+        echo $autoscaling_name
     fi
 
     return 0
@@ -82,7 +82,7 @@ autoscaling_group_name() {
 #   Returns 0 if the instance was successfully moved to standby. Non-zero otherwise.
 autoscaling_enter_standby() {
     local instance_id=$1
-    local asg_name=${2}
+    local asg_name=$2
 
     msg "Checking if this instance has already been moved in the Standby state"
     local instance_state=$(get_instance_state_asg $instance_id)
@@ -101,9 +101,9 @@ autoscaling_enter_standby() {
         return 0
     fi
 
-    msg "Checking to see if ASG ${asg_name} will let us decrease desired capacity"
+    msg "Checking to see if ASG $asg_name will let us decrease desired capacity"
     local min_desired=$($AWS_CLI autoscaling describe-auto-scaling-groups \
-        --auto-scaling-group-name "${asg_name}" \
+        --auto-scaling-group-name $asg_name \
         --query 'AutoScalingGroups[0].[MinSize, DesiredCapacity]' \
         --output text)
 
@@ -111,31 +111,31 @@ autoscaling_enter_standby() {
     local desired_cap=$(echo $min_desired | awk '{print $2}')
 
     if [ -z "$min_cap" -o -z "$desired_cap" ]; then
-        msg "Unable to determine minimum and desired capacity for ASG ${asg_name}."
+        msg "Unable to determine minimum and desired capacity for ASG $asg_name."
         msg "Attempting to put this instance into standby regardless."
     elif [ $min_cap == $desired_cap -a $min_cap -gt 0 ]; then
         local new_min=$(($min_cap - 1))
-        msg "Decrementing ASG ${asg_name}'s minimum size to $new_min"
+        msg "Decrementing ASG $asg_name's minimum size to $new_min"
         msg $($AWS_CLI autoscaling update-auto-scaling-group \
-            --auto-scaling-group-name "${asg_name}" \
+            --auto-scaling-group-name $asg_name \
             --min-size $new_min)
         if [ $? != 0 ]; then
-            msg "Failed to reduce ASG ${asg_name}'s minimum size to $new_min. Cannot put this instance into Standby."
+            msg "Failed to reduce ASG $asg_name's minimum size to $new_min. Cannot put this instance into Standby."
             return 1
         else
-            msg "ASG ${asg_name}'s minimum size has been decremented, creating flag file /tmp/asgmindecremented"
+            msg "ASG $asg_name's minimum size has been decremented, creating flag file /tmp/asgmindecremented"
             # Create a "flag" file to denote that the ASG min has been decremented
             touch /tmp/asgmindecremented
         fi
     fi
 
-    msg "Putting instance $instance_id into Standby"
+    msg "Putting instance '$instance_id' into Standby"
     $AWS_CLI autoscaling enter-standby \
         --instance-ids $instance_id \
-        --auto-scaling-group-name "${asg_name}" \
+        --auto-scaling-group-name $asg_name \
         --should-decrement-desired-capacity
     if [ $? != 0 ]; then
-        msg "Failed to put instance $instance_id into Standby for ASG ${asg_name}."
+        msg "Failed to put instance '$instance_id' into Standby for ASG $asg_name."
         return 1
     fi
 
@@ -143,7 +143,7 @@ autoscaling_enter_standby() {
     wait_for_state "autoscaling" $instance_id "Standby"
     if [ $? != 0 ]; then
         local wait_timeout=$(($WAITER_INTERVAL * $WAITER_ATTEMPTS))
-        msg "Instance $instance_id did not make it to standby after $wait_timeout seconds"
+        msg "Instance '$instance_id' did not make it to standby after $wait_timeout seconds"
         return 1
     fi
 
@@ -156,7 +156,7 @@ autoscaling_enter_standby() {
 #   successful.
 autoscaling_exit_standby() {
     local instance_id=$1
-    local asg_name=${2}
+    local asg_name=$2
 
     msg "Checking if this instance has already been moved out of Standby state"
     local instance_state=$(get_instance_state_asg $instance_id)
@@ -175,12 +175,12 @@ autoscaling_exit_standby() {
         return 0
     fi
 
-    msg "Moving instance $instance_id out of Standby"
+    msg "Moving instance '$instance_id' out of Standby"
     $AWS_CLI autoscaling exit-standby \
         --instance-ids $instance_id \
-        --auto-scaling-group-name "${asg_name}"
+        --auto-scaling-group-name $asg_name
     if [ $? != 0 ]; then
-        msg "Failed to put instance $instance_id back into InService for ASG ${asg_name}."
+        msg "Failed to put instance '$instance_id' back into InService for ASG $asg_name."
         return 1
     fi
 
@@ -188,28 +188,28 @@ autoscaling_exit_standby() {
     wait_for_state "autoscaling" $instance_id "InService"
     if [ $? != 0 ]; then
         local wait_timeout=$(($WAITER_INTERVAL * $WAITER_ATTEMPTS))
-        msg "Instance $instance_id did not make it to InService after $wait_timeout seconds"
+        msg "Instance '$instance_id' did not make it to InService after $wait_timeout seconds"
         return 1
     fi
     
     if [ -a /tmp/asgmindecremented ]; then
         local min_desired=$($AWS_CLI autoscaling describe-auto-scaling-groups \
-            --auto-scaling-group-name "${asg_name}" \
+            --auto-scaling-group-name $asg_name \
             --query 'AutoScalingGroups[0].[MinSize, DesiredCapacity]' \
             --output text)
 
         local min_cap=$(echo $min_desired | awk '{print $1}')
 
         local new_min=$(($min_cap + 1))
-        msg "Incrementing ASG ${asg_name}'s minimum size to $new_min"
+        msg "Incrementing ASG $asg_name's minimum size to $new_min"
         msg $($AWS_CLI autoscaling update-auto-scaling-group \
-            --auto-scaling-group-name "${asg_name}" \
+            --auto-scaling-group-name $asg_name \
             --min-size $new_min)
         if [ $? != 0 ]; then
-            msg "Failed to increase ASG ${asg_name}'s minimum size to $new_min."
+            msg "Failed to increase ASG $asg_name's minimum size to $new_min."
             return 1
         else
-            msg "Successfully incremented ASG ${asg_name}'s minimum size"
+            msg "Successfully incremented ASG $asg_name's minimum size"
             msg "Removing /tmp/asgmindecremented flag file"
             rm -f /tmp/asgmindecremented
         fi
@@ -266,7 +266,7 @@ wait_for_state() {
 
     local instance_state_cmd
     if [ "$service" == "elb" ]; then
-        instance_state_cmd="get_instance_health_elb $instance_id $elb"
+        instance_state_cmd="get_instance_state_elb $instance_id $elb"
         reset_waiter_timeout $elb
     elif [ "$service" == "autoscaling" ]; then
         instance_state_cmd="get_instance_state_asg $instance_id"
@@ -275,7 +275,8 @@ wait_for_state() {
         return 1
     fi
 
-    msg "Checking $WAITER_ATTEMPTS times, every $WAITER_INTERVAL seconds, for instance $instance_id to be in state $state_name"
+    msg "Checking for a maximum of $WAITER_ATTEMPTS times, every $WAITER_INTERVAL seconds, \
+         for instance '$instance_id' to be in state '$state_name'"
 
     local instance_state=$($instance_state_cmd)
     local count=1
@@ -283,8 +284,8 @@ wait_for_state() {
     msg "Instance is currently in state: $instance_state"
     while [ "$instance_state" != "$state_name" ]; do
         if [ $count -ge $WAITER_ATTEMPTS ]; then
-            local timeout=$(($WAITER_ATTEMPTS * $WAITER_INTERVAL))
-            msg "Instance failed to reach state, $state_name within $timeout seconds"
+            local timeout=$(( ($WAITER_ATTEMPTS - 1) * $WAITER_INTERVAL ))
+            msg "Instance failed to reach state '$state_name' within $timeout seconds"
             return 1
         fi
 
@@ -298,37 +299,41 @@ wait_for_state() {
     return 0
 }
 
-# Usage: get_instance_health_elb <EC2 instance ID> <ELB name>
+# Usage: get_instance_state_elb <EC2 instance ID> <ELB name>
 #
-#    Gets the health of the given <EC2 instance ID> as known by <ELB name>. If it's a valid health
-#    status (one of InService|OutOfService|Unknown), then the health is printed to STDOUT and the
-#    function returns 0. Otherwise, no output and return is non-zero.
-get_instance_health_elb() {
+#    Gets the state of the given <EC2 instance ID> as known by <ELB name> and prints it to STDOUT.
+#    The function returns 0 if the instance is registered to the ELB and non-zero otherwise.
+get_instance_state_elb() {
     local instance_id=$1
     local elb_name=$2
 
-    msg "Checking status of instance '$instance_id' in load balancer '$elb_name'"
+    msg "Checking state of instance '$instance_id' in load balancer '$elb_name'"
 
-    # If describe-instance-health for this instance returns an error, then it's not part of
-    # this ELB. But, if the call was successful let's still double check that the status is
-    # valid.
-    local instance_status=$($AWS_CLI elb describe-instance-health \
+    local instance_state
+    instance_state=$($AWS_CLI elb describe-instance-health \
         --load-balancer-name $elb_name \
         --instances $instance_id \
         --query 'InstanceStates[].State' \
         --output text 2>/dev/null)
 
-    if [ $? == 0 ]; then
-        case "$instance_status" in
-            InService|OutOfService|Unknown)
-                echo -n $instance_status
-                return 0
-                ;;
-            *)
-                msg "Instance '$instance_id' not part of ELB '$elb_name'"
-                return 1
-        esac
+    if [ $? != 0 ]; then
+        return 2
     fi
+
+    echo -n $instance_state
+
+    $AWS_CLI elb describe-load-balancers \
+        --load-balancer-name $elb_name \
+        --query 'LoadBalancerDescriptions[0].Instances' \
+        --output text \
+        | grep -q $instance_id
+
+    if [ $? != 0 ]; then
+        msg "Instance '$instance_id' is not registered to ELB '$elb_name'"
+        return 1
+    fi
+
+    msg "State is: $instance_state"
 }
 
 # Usage: validate_elb <EC2 instance ID> <ELB name>
@@ -351,9 +356,10 @@ validate_elb() {
         return 1
     fi
 
-    msg "Checking health of '$instance_id' as known by ELB '$elb_name'"
-    local instance_health=$(get_instance_health_elb $instance_id $elb_name)
-    if [ $? != 0 ]; then
+    msg "Checking state of '$instance_id' as known by ELB '$elb_name'"
+    local instance_state
+    instance_state=$(get_instance_state_elb $instance_id $elb_name)
+    if [ -z "$instance_state" ]; then
         return 1
     fi
 
@@ -363,42 +369,31 @@ validate_elb() {
 # Usage: get_elb_list <EC2 instance ID>
 #
 #   Finds all the ELBs that this instance is registered to. After execution, the variable
-#   "ELB_LIST" will contain the list of load balancers for the given instance.
+#   "INSTANCE_ELBS" will contain the list of load balancers for the given instance.
 #
-#   If the given instance ID isn't found registered to any ELBs, the function returns non-zero
+#   If the given instance ID isn't found registered to any ELBs, the function returns non-zero.
 get_elb_list() {
     local instance_id=$1
 
-    local asg_name=$($AWS_CLI autoscaling describe-auto-scaling-instances \
-        --instance-ids $instance_id \
-        --query AutoScalingInstances[*].AutoScalingGroupName \
-        --output text | sed -e $'s/\t/ /g')
     local elb_list=""
 
-    if [ -z "${asg_name}" ]; then
-        msg "Instance is not part of an ASG. Looking up from ELB."
-        local all_balancers=$($AWS_CLI elb describe-load-balancers \
-            --query LoadBalancerDescriptions[*].LoadBalancerName \
-            --output text | sed -e $'s/\t/ /g')
-        for elb in $all_balancers; do
-            local instance_health
-            instance_health=$(get_instance_health_elb $instance_id $elb)
-            if [ $? == 0 ]; then
-                elb_list="$elb_list $elb"
-            fi
-        done
-    else
-        elb_list=$($AWS_CLI autoscaling describe-auto-scaling-groups \
-            --auto-scaling-group-names "${asg_name}" \
-            --query AutoScalingGroups[*].LoadBalancerNames \
-            --output text | sed -e $'s/\t/ /g')
-    fi
+    local instance_balancers=$($AWS_CLI elb describe-load-balancers \
+        --query "LoadBalancerDescriptions[?contains(Instances[].InstanceId, \`$instance_id\`)].LoadBalancerName" \
+        --output text | sed -e $'s/\t/ /g')
+
+    for elb in $instance_balancers; do
+        local instance_state
+        instance_state=$(get_instance_state_elb $instance_id $elb)
+        if [ $? == 0 ]; then
+            elb_list="$elb_list $elb"
+        fi
+    done
 
     if [ -z "$elb_list" ]; then
         return 1
     else
         msg "Got load balancer list of: $elb_list"
-        ELB_LIST=$elb_list
+        INSTANCE_ELBS=$elb_list
         return 0
     fi
 }
