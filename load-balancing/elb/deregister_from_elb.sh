@@ -17,21 +17,21 @@
 
 msg "Running AWS CLI with region: $(get_instance_region)"
 
-# get this instance's ID
+# Get this instance's ID.
 INSTANCE_ID=$(get_instance_id)
 if [ $? != 0 -o -z "$INSTANCE_ID" ]; then
     error_exit "Unable to get this instance's ID; cannot continue."
 fi
 
-# Get current time
+# Get current time.
 msg "Started $(basename $0) at $(/bin/date "+%F %T")"
 start_sec=$(/bin/date +%s.%N)
 
-msg "Checking if instance $INSTANCE_ID is part of an AutoScaling group"
+msg "Checking if instance '$INSTANCE_ID' is part of an AutoScaling group"
 asg=$(autoscaling_group_name $INSTANCE_ID)
-if [ $? == 0 -a -n "${asg}" ]; then
-    msg "Found AutoScaling group for instance $INSTANCE_ID: ${asg}"
-    
+if [ $? == 0 -a -n "$asg" ]; then
+    msg "Found AutoScaling group for instance '$INSTANCE_ID': $asg"
+
     msg "Checking that installed CLI version is at least at version required for AutoScaling Standby"
     check_cli_version
     if [ $? != 0 ]; then
@@ -39,20 +39,20 @@ if [ $? == 0 -a -n "${asg}" ]; then
     fi
 
     msg "Attempting to put instance into Standby"
-    autoscaling_enter_standby $INSTANCE_ID "${asg}"
+    autoscaling_enter_standby $INSTANCE_ID $asg
     if [ $? != 0 ]; then
-        error_exit "Failed to move instance into standby"
+        error_exit "Failed to put instance into Standby"
     else
-        msg "Instance is in standby"
+        msg "Instance is in Standby"
         exit 0
     fi
 fi
 
 msg "Instance is not part of an ASG, continuing..."
 
-msg "Checking that user set at least one load balancer"
 if test -z "$ELB_LIST"; then
-    error_exit "Must have at least one load balancer to deregister from"
+    msg "Instance is not registered to any load balancer"
+    exit 0
 fi
 
 # Loop through all LBs the user set, and attempt to deregister this instance from them.
@@ -60,24 +60,24 @@ for elb in $ELB_LIST; do
     msg "Checking validity of load balancer named '$elb'"
     validate_elb $INSTANCE_ID $elb
     if [ $? != 0 ]; then
-        msg "Error validating $elb; cannot continue with this LB"
+        msg "Error validating '$elb'; cannot continue with this LB"
         continue
     fi
 
-    msg "Deregistering $INSTANCE_ID from $elb"
+    msg "Deregistering '$INSTANCE_ID' from '$elb'"
     deregister_instance $INSTANCE_ID $elb
 
     if [ $? != 0 ]; then
-        error_exit "Failed to deregister instance $INSTANCE_ID from ELB $elb"
+        error_exit "Failed to deregister instance '$INSTANCE_ID' from ELB '$elb'"
     fi
 done
 
-# Wait for all Deregistrations to finish
+# Wait for all de-registrations to finish.
 msg "Waiting for instance to de-register from its load balancers"
 for elb in $ELB_LIST; do
     wait_for_state "elb" $INSTANCE_ID "OutOfService" $elb
     if [ $? != 0 ]; then
-        error_exit "Failed waiting for $INSTANCE_ID to leave $elb"
+        error_exit "Failed waiting for '$INSTANCE_ID' to leave '$elb'"
     fi
 done
 
